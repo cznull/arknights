@@ -1030,11 +1030,11 @@ int gendia(const char* text, int textlength,float *charpos,int &charcount, GLuin
 	}
 	charcount = 0;
 	for (int c = 0; c < length; c++) {
-		if (s[c] == L"�"[0] && c > 1 && s[c - 1] == L"��"[0]) {
-			s[c] = L"¿"[0];
+		if (s[c] == L"æ«"[0] && c > 1 && s[c - 1] == L"Ã×"[0]) {
+			s[c] = L"Â¿"[0];
 		}
-		if (s[c] == L"��"[0]) {
-			s[c] = L"¿"[0];
+		if (s[c] == L"ÍÃ"[0]) {
+			s[c] = L"Â¿"[0];
 		}
 		if (s[c] == L"<"[0]) {
 			int pos = find(s + c, length - c, L">", 1);
@@ -1120,11 +1120,11 @@ int gendec(std::vector<std::string> decs, float* charpos, GLuint tex) {
 			length = 128;
 		}
 		for (int c = 0; c < length; c++) {
-			if (s[c] == L"�"[0] && c > 1 && s[c - 1] == L"��"[0]) {
-				s[c] = L"¿"[0];
+			if (s[c] == L"æ«"[0] && c > 1 && s[c - 1] == L"Ã×"[0]) {
+				s[c] = L"Â¿"[0];
 			}
-			if (s[c] == L"��"[0]) {
-				s[c] = L"¿"[0];
+			if (s[c] == L"ÍÃ"[0]) {
+				s[c] = L"Â¿"[0];
 			}
 			FT_UInt charindex = FT_Get_Char_Index(face, s[c]);
 			i = FT_Load_Glyph(face, charindex, FT_LOAD_DEFAULT);
@@ -2253,7 +2253,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		int i, j;
 		i = FT_Init_FreeType(&ftlib);
-		i = FT_New_Face(ftlib, "D:/files/data/5/avg/Font/NotoSansHans-Medium.otf", 0, &face);
+		i = FT_New_Face(ftlib, "D:/files/data/5/avg/Font/SourceHanSansSC-Medium.otf", 0, &face);
 		i = FT_Set_Pixel_Sizes(face, 128, 128);
 		i = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
 		break;
