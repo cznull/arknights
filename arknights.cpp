@@ -16,9 +16,9 @@
 #include FT_FREETYPE_H
 
 #ifdef _DEBUG
-#pragma comment(lib,"opencv_world401d.lib")
+#pragma comment(lib,"opencv_world411d.lib")
 #else
-#pragma comment(lib,"opencv_world401.lib")
+#pragma comment(lib,"opencv_world411.lib")
 
 #endif 
 
@@ -50,16 +50,42 @@ struct char_t {
 	int focus;
 };
 
+struct charcutin_t {
+	GLuint cc;
+	float x, width;
+};
+
 struct blocker_t {
 	float r, g, b, a;
+};
+
+struct dec_t {
+	GLuint dectex;
+	int count;
+	float turn[8];
+};
+
+struct texdata_t {
+	int w, h;
+	std::vector<int> data;
 };
 
 struct framedes_t {
 	GLuint dia, cname;
 	float diapos, turnpos, cnamepos;
+	float amount;
 	blocker_t blocker;
 	image_t image, bg;
 	char_t c;
+	charcutin_t cc;
+	dec_t dec;
+}; 
+
+struct frametexdate_t {
+	texdata_t dia, cname;
+	texdata_t image, bg;
+	texdata_t c1,c2;
+	texdata_t cc;
 };
 
 struct fadedes_t {
@@ -68,11 +94,17 @@ struct fadedes_t {
 	int blockerall, blockerleft;
 	int charall, charleft;
 	int camerashakeall, camerashakeleft, fadeout, xf;
+	int charcutinall, charcutinleft;
 	float moveleft, moveall, sx, sy, yf, xt, yt;
 };
 
+struct framecache_t {
+	framedes_t frame;
+	frametexdate_t frametexdata;
+};
+
 struct musicpic_t {
-	int length;
+	size_t length;
 	int rate;
 	float2 *data;
 };
@@ -81,6 +113,11 @@ struct musicevent_t {
 	musicpic_t intro, loop;
 	int starttime, fadetime;
 	float volume;
+};
+
+
+struct imgname_t {
+	std::string rgb, a;
 };
 
 // Global Variables:
@@ -94,8 +131,8 @@ int mx, my, cx, cy;
 
 GLuint texbuffer, framebuffer, depthbuffer;
 GLuint texbufferim, framebufferim, depthbufferim;
-GLuint bg, image, c1, c2, dia, cname;
-GLuint bg_, image_, c1_, c2_;
+GLuint bg, image, c1, c2, cc, dia, cname, dec,diabg;
+GLuint bg_, image_, c1_, c2_, cc_;
 cv::VideoWriter writer;
 cv::Mat frame(1080, 1920, CV_8UC3, cv::Scalar(0, 0, 0));
 unsigned char frim[2048 * 2048 * 3];
@@ -103,6 +140,8 @@ int totalframe = 0;
 std::map<std::string, musicpic_t> musicpics;
 std::map<std::string, std::string> musicmap;
 std::map<std::string, std::vector<musicevent_t>> channel;
+std::map<std::string, std::vector<imgname_t>> charnamemap;
+std::string filename;
 
 FT_Library ftlib;
 FT_Face face;
@@ -113,6 +152,7 @@ ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+int play(int cur);
 
 bool eventsort(const musicevent_t &a,const musicevent_t &b) {
 	return a.starttime < b.starttime;
@@ -137,10 +177,29 @@ int find(const char* text, int textlength, const char* tag, int taglength) {
 	return -1;
 }
 
+int cmp(const wchar_t* s1, const wchar_t* s2, int nof2) {
+	for (int i = 0; i < nof2; i++) {
+		if (!s1[i] || s1[i] != s2[i]) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int find(const wchar_t* text, int textlength, const wchar_t* tag, int taglength) {
+	int i;
+	for (i = 0; i <= textlength - taglength; i++) {
+		if (!cmp(text + i, tag, taglength)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 int getline(char* s, int length, std::vector<std::string>& line) {
 	int cur, next;
 	cur = 0;
-	next = find(s + cur, length - cur, "\r\n", 2);
+	next = find(s + cur, length - cur, "\n", 1);
 	while (next >= 0) {
 		if (next > 0) {
 			//int i;
@@ -149,8 +208,11 @@ int getline(char* s, int length, std::vector<std::string>& line) {
 				line.push_back(std::string(s + cur, next));
 			//}
 		}
-		cur += next + 2;
-		next = find(s + cur, length - cur, "\r\n", 2);
+		else {
+			//line.push_back(std::string());
+		}
+		cur += next + 1;
+		next = find(s + cur, length - cur, "\n", 1);
 	}
 	if (length > cur) {
 		line.push_back(std::string(s + cur, length - cur));
@@ -210,10 +272,42 @@ int loadmusicmap(void) {
 	return 0;
 }
 
+
+
+int loadcharnamemap(void) {
+	FILE* fi;
+	char* ficon;
+	int ficount;
+	std::vector<std::string> line;
+	if (!fopen_s(&fi, "D:/files/data/5/avg/charname.txt", "rb")) {
+		fseek(fi, 0, SEEK_END);
+		ficount = ftell(fi);
+		fseek(fi, 0, SEEK_SET);
+		ficon = (char*)malloc(ficount * sizeof(char));
+		ficount = fread(ficon, 1, ficount, fi);
+		fclose(fi);
+		getline(ficon, ficount, line, "\n\n", 2);
+		for (int i = 0; i < line.size(); i++) {
+			std::vector<std::string> line1;
+			getline(line[i].c_str(), line[i].length(), line1, "\n", 1);
+			std::vector<imgname_t> imgs;
+			for (int j = 1; j < line1.size(); j++) {
+				std::vector<std::string> line2;
+				getline(line1[j].c_str(), line1[j].length(), line2, "\t", 1);
+				if (line2.size() == 2) {
+					imgs.push_back({ line2[0],line2[1] });
+				}
+			}
+			charnamemap.insert(std::make_pair(line1[0], imgs));
+		}
+	}
+	return 0;
+}
+
 int savemusic(musicpic_t music) {
 	FILE* fi;
 	int x;
-	if (!fopen_s(&fi, "D:/files/data/5/avg/test.wav", "wb")) {
+	if (!fopen_s(&fi, ("C:/files/avg/" + filename + ".wav").c_str(), "wb")) {
 		fwrite("RIFF", 1, 4, fi);
 		x = music.length * 8 + 36;
 		fwrite(&x, 1, 4, fi);
@@ -226,7 +320,7 @@ int savemusic(musicpic_t music) {
 		fwrite(&x, 1, 2, fi);
 		x = 44100;
 		fwrite(&x, 1, 4, fi);
-		x = 44100*8;
+		x = 44100 * 8;
 		fwrite(&x, 1, 4, fi);
 		x = 4;
 		fwrite(&x, 1, 2, fi);
@@ -379,26 +473,26 @@ int genmusic(void) {
 	return 0;
 }
 
-int drawquad(float x, float y, float sx, float sy, float r, float g, float b, float a, GLuint tex) {
+int drawquad(float x, float y, float sx, float sy, float r, float g, float b, float a, GLuint tex, float width = 1.0) {
 
 #ifdef _SHOW
 	glBindTexture(GL_TEXTURE_2D, tex);
 	glBegin(GL_QUADS);
 	glColor4f(r, g, b, a);
-	glTexCoord2f(0.0f, 1.0f);
-	glVertex3f((x - sx) * (9.0f / 16.0f), y - sy, 0.0f);
+	glTexCoord2f(0.5f - 0.5f * width, 1.0f);
+	glVertex3f((x - sx * width) * (9.0f / 16.0f), y - sy, 0.0f);
 
 	glColor4f(r, g, b, a);
-	glTexCoord2f(1.0f, 1.0f);
-	glVertex3f((x + sx) * (9.0f / 16.0f), y - sy, 0.0f);
+	glTexCoord2f(0.5f + 0.5f * width, 1.0f);
+	glVertex3f((x + sx * width) * (9.0f / 16.0f), y - sy, 0.0f);
 
 	glColor4f(r, g, b, a);
-	glTexCoord2f(1.0f, 0.0f);
-	glVertex3f((x + sx) * (9.0f / 16.0f), y + sy, 0.0f);
+	glTexCoord2f(0.5f + 0.5f * width, 0.0f);
+	glVertex3f((x + sx * width) * (9.0f / 16.0f), y + sy, 0.0f);
 
 	glColor4f(r, g, b, a);
-	glTexCoord2f(0.0f, 0.0f);
-	glVertex3f((x - sx) * (9.0f / 16.0f), y + sy, 0.0f);
+	glTexCoord2f(0.5f - 0.5f * width, 0.0f);
+	glVertex3f((x - sx * width) * (9.0f / 16.0f), y + sy, 0.0f);
 	glEnd();
 #endif
 	return 0;
@@ -493,13 +587,13 @@ int draw(framedes_t &f, framedes_t &f1,fadedes_t &fade) {
 	if (fade.imageleft) {
 		if (f1.image.tex) {
 			exectween(f1.image);
-			drawquad(f1.image.x, f1.image.y, (16.0 / 9.0) * f1.image.sx, f1.image.sy, 1.0, 1.0, 1.0, 1.0 * fade.imageleft / (fade.imageall + 1.0), f1.image.tex);
+			drawquad1(f1.image.x, f1.image.y, (16.0 / 9.0) * f1.image.sx, f1.image.sy, 1.0, 1.0, 1.0, 1.0 * fade.imageleft / (fade.imageall + 1.0), f1.image.tex);
 		}
 	}
 
 	if (f.image.tex) {
 		exectween(f.image);
-		drawquad(f.image.x, f.image.y, (16.0 / 9.0) * f.image.sx, f.image.sy, 1.0, 1.0, 1.0, 1.0 - 1.0 * fade.imageleft / (fade.imageall + 1.0), f.image.tex);
+		drawquad1(f.image.x, f.image.y, (16.0 / 9.0) * f.image.sx, f.image.sy, 1.0, 1.0, 1.0, 1.0 - 1.0 * fade.imageleft / (fade.imageall + 1.0), f.image.tex);
 	}
 
 	if (fade.imageleft) {
@@ -552,7 +646,7 @@ int draw(framedes_t &f, framedes_t &f1,fadedes_t &fade) {
 				drawquad(-0.5555, -0.5, 1.4, 1.4, 0.5, 0.5, 0.5, 1.0 - 1.0 * fade.charleft / (fade.charall + 1.0), f.c.c1);
 				drawquad(0.5555, -0.5, 1.4, 1.4, 1.0, 1.0, 1.0, 1.0 - 1.0 * fade.charleft / (fade.charall + 1.0), f.c.c2);
 			}
-			else if (f.c.focus = -1) {
+			else if (f.c.focus == -1) {
 				drawquad(0.5555, -0.5, 1.4, 1.4, 0.5, 0.5, 0.5, 1.0 - 1.0 * fade.charleft / (fade.charall + 1.0), f.c.c2);
 				drawquad(-0.5555, -0.5, 1.4, 1.4, 0.5, 0.5, 0.5, 1.0 - 1.0 * fade.charleft / (fade.charall + 1.0), f.c.c1);
 			}
@@ -575,6 +669,22 @@ int draw(framedes_t &f, framedes_t &f1,fadedes_t &fade) {
 		fade.charleft--;
 	}
 
+	if (fade.charcutinleft) {
+		if (f1.cc.cc) {
+			drawquad(f1.cc.x, -0.41, 1.48, 1.48, 0.5, 0.5, 0.5, 1.0, 0, f1.cc.width/ (2.0*1.48) * fade.charcutinleft / (fade.charcutinall + 1.0));
+			drawquad(f1.cc.x, -0.41, 1.48, 1.48, 1.0, 1.0, 1.0, 1.0, f1.cc.cc, f1.cc.width/ (2.0 * 1.48) * fade.charcutinleft / (fade.charcutinall + 1.0));
+		}
+	}
+
+	if (f.cc.cc) {
+		drawquad(f.cc.x, -0.41, 1.48, 1.48, 0.5, 0.5, 0.5, 1.0, 0, f.cc.width/ (2.0 * 1.48) - f.cc.width/ (2.0 * 1.48) * fade.charcutinleft / (fade.charcutinall + 1.0));
+		drawquad(f.cc.x, -0.41, 1.48, 1.48, 1.0, 1.0, 1.0, 1.0, f.cc.cc, f.cc.width/ (2.0 * 1.48) - f.cc.width/ (2.0 * 1.48) * fade.charcutinleft / (fade.charcutinall + 1.0));
+	}
+
+	if (fade.charcutinleft) {
+		fade.charcutinleft--;
+	}
+
 	glLoadIdentity();
 
 	if (fade.blockerleft) {
@@ -592,7 +702,7 @@ int draw(framedes_t &f, framedes_t &f1,fadedes_t &fade) {
 #ifdef _SHOW
 
 	if (f.dia) {
-		glBindTexture(GL_TEXTURE_2D, 0);
+		/*glBindTexture(GL_TEXTURE_2D, 0);
 		glBegin(GL_QUADS);
 		glColor4f(0.0, 0.0, 0.0, 1.0);
 		glVertex3f(-1.0,-1.0, -0.0f);
@@ -610,7 +720,8 @@ int draw(framedes_t &f, framedes_t &f1,fadedes_t &fade) {
 		glVertex3f(1.0, -0.7, -0.0f);
 		glColor4f(0.0, 0.0, 0.0, 0.0);
 		glVertex3f(-1.0, -0.7, 0.0f);
-		glEnd();
+		glEnd();*/
+		drawquad(0, 0, 16.0 / 9.0, 1.0, 1.0, 1.0, 1.0, 1.0, diabg);
 
 		float dx = 36.0 * 2.0 / 1920;
 		float dy = 36.0 * 2.0 / 1080;
@@ -681,9 +792,76 @@ int draw(framedes_t &f, framedes_t &f1,fadedes_t &fade) {
 		glVertex3f(-0.483f - dx * f.cnamepos, -0.868f + dy, -0.0f);
 		glEnd();
 	}
+	if (f.dec.dectex) {
+		int count = f.dec.count;
+		for (int i = 0; i < count; i++) {
+			drawquad(0.0, ((count - 1) * 0.5 - i) * 0.278 + 0.222, 0.506, 0.089, 1.0, 1.0, 1.0, 1.0, 0);
+			drawquad(0.0, ((count - 1) * 0.5 - i) * 0.278 + 0.222, 0.5, 0.083, 0.2, 0.2, 0.2, 1.0, 0);
+			float dx = 36.0 * 2.0 / 1920;
+			float dy = 36.0 * 2.0 / 1080;
+			float x0 = -0.5f * dx * (f.dec.turn[i + 1] - f.dec.turn[i]);
+			float y0 = ((count - 1) * 0.5 - i) * 0.278 + 0.192;
+			float yc = ((count - 1) * 0.5 - i) * 0.278 + 0.222;
+			float xc = 0.0;
+			if (x0 < -0.2667) {
+				dx *= -0.2667 / x0;
+				dy *= -0.2667 / x0;
+				y0 = yc + (y0 - yc) * (-0.2667 / x0);
+				x0 = -0.2667;
+			}
 
+			glBindTexture(GL_TEXTURE_2D, f.dec.dectex);
+			glBegin(GL_QUADS);
+			glColor4f(1.0, 1.0, 1.0, 1.0);
+			glTexCoord2f(f.dec.turn[i] * (1.0f / 64.0f), 1.0f);
+			glVertex3f(x0, y0 - dy, -0.0f);
+
+			glColor4f(1.0, 1.0, 1.0, 1.0);
+			glTexCoord2f(f.dec.turn[i + 1] * (1.0f / 64.0f), 1.0f);
+			glVertex3f(x0 + dx * (f.dec.turn[i + 1] - f.dec.turn[i]), y0 - dy, -0.0f);
+
+			glColor4f(1.0, 1.0, 1.0, 1.0);
+			glTexCoord2f(f.dec.turn[i + 1] * (1.0f / 64.0f), 0.0f);
+			glVertex3f(x0 + dx * (f.dec.turn[i + 1] - f.dec.turn[i]), y0 + dy, -0.0f);
+
+			glColor4f(1.0, 1.0, 1.0, 1.0);
+			glTexCoord2f(f.dec.turn[i] * (1.0f / 64.0f), 0.0f);
+			glVertex3f(x0, y0 + dy, -0.0f);
+			glEnd();
+		}
+	}
 	glFinish(); 
-	
+
+#ifdef _RECORD
+	int i, j;
+	glBindTexture(GL_TEXTURE_2D, texbuffer);
+	glReadPixels(0, 0, 1920, 1080, GL_RGB, GL_UNSIGNED_BYTE, frim);
+	//glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, frim);
+	if (f.amount) {
+		for (i = 0; i < 1080; i++) {
+			for (j = 0; j < 1920; j++) {
+				float g = frim[((1079 - i) * 1920 + j) * 3 + 2] * 0.299 + frim[((1079 - i) * 1920 + j) * 3 + 1] * 0.587 + frim[((1079 - i) * 1920 + j) * 3 + 0] * 0.114;
+				if (g > 255) {
+					g = 255;
+				}
+				frame.data[(i * 1920 + j) * 3 + 0] = g;
+				frame.data[(i * 1920 + j) * 3 + 1] = g;
+				frame.data[(i * 1920 + j) * 3 + 2] = g;
+			}
+		}
+	}
+	else {
+		for (i = 0; i < 1080; i++) {
+			for (j = 0; j < 1920; j++) {
+				frame.data[(i * 1920 + j) * 3 + 0] = frim[((1079 - i) * 1920 + j) * 3 + 2];
+				frame.data[(i * 1920 + j) * 3 + 1] = frim[((1079 - i) * 1920 + j) * 3 + 1];
+				frame.data[(i * 1920 + j) * 3 + 2] = frim[((1079 - i) * 1920 + j) * 3 + 0];
+			}
+		}
+	}
+	writer << frame;
+#endif
+
 	glViewport(0, 0, cx, cy);
 	glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
 	glClearColor(1.0, 1.0, 1.0, 0.0);
@@ -710,32 +888,20 @@ int draw(framedes_t &f, framedes_t &f1,fadedes_t &fade) {
 	
 	SwapBuffers(hdc1);
 
-#ifdef _RECORD
-	int i, j;
-	glBindTexture(GL_TEXTURE_2D, texbuffer);
-	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, frim);
-	for (i = 0; i < 1080; i++) {
-		for (j = 0; j < 1920; j++) {
-			frame.data[(i * 1920 + j) * 3 + 0] = frim[((1079 - i) * 1920 + j) * 3 + 2];
-			frame.data[(i * 1920 + j) * 3 + 1] = frim[((1079 - i) * 1920 + j) * 3 + 1];
-			frame.data[(i * 1920 + j) * 3 + 2] = frim[((1079 - i) * 1920 + j) * 3 + 0];
-		}
-	}
-	writer << frame;
-#endif
 
 #endif
 	return 0;
 }
 
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
+/*int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPWSTR    lpCmdLine,
                      _In_ int       nCmdShow)
-{
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
-
+{*/
+int main(int argc,char **argv){
+    //UNREFERENCED_PARAMETER(hPrevInstance);
+    //UNREFERENCED_PARAMETER(lpCmdLine);
+	HINSTANCE hInstance = ::GetModuleHandle(NULL);
     // TODO: Place code here.
 
     // Initialize global strings
@@ -743,8 +909,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     LoadStringW(hInstance, IDC_ARKNIGHTS, szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
 
+	//std::cout << "yweiuryiwuyruw\n\n" << argc << argv[1];
+	if (argc > 1) {
+		filename = argv[1];
+	}
+	else {
+		filename = "test";
+	}
+	srand(GetTickCount());
+	loadmusicmap();
+	loadcharnamemap();
+	if (fopen_s(&filog, "D:/files/data/5/avg/log.txt", "ab")) {
+		return 0;
+	}
+
+
     // Perform application initialization:
-    if (!InitInstance (hInstance, nCmdShow))
+    if (!InitInstance (hInstance, SW_SHOW))
     {
         return FALSE;
     }
@@ -752,20 +933,27 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_ARKNIGHTS));
 
     MSG msg;
-	srand(GetTickCount());
-	loadmusicmap();
-	//loadmusic("Sound_Beta_2/Enemy/e_skill/e_skill_skulsrsword");
-	if (fopen_s(&filog, "D:/files/data/5/avg/log_audio.txt", "ab")) {
-		return 0;
-	}
-    // Main message loop:
-    while (GetMessage(&msg, nullptr, 0, 0))
+	int cur = 0;
+    while (1)
     {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			if (msg.message == WM_QUIT)
+				break;
+			if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+			{
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}
+		}
+		else {
+			cur = play(cur);
+			if (cur == -1) {
+				writer.release();
+				genmusic();
+				break;
+			}
+		}
     }
 	fclose(filog);
     return (int) msg.wParam;
@@ -817,31 +1005,71 @@ int getparas(const char* text, int textlength, const char* tag, int taglength, s
 	return -1;
 }
 
-int gendia(const char* text, int textlength,float *charpos,int &length, GLuint tex) {
+int tr1610(char c) {
+	if ('0' <= c && c <= '9') {
+		return c - '0';
+	}
+	else if ('a' <= c && c <= 'z') {
+		return c - 'a' + 10;
+	}
+	else if ('A' <= c && c <= 'Z') {
+		return c - 'A' + 10;
+	}
+	return 0;
+}
+
+int gendia(const char* text, int textlength,float *charpos,int &charcount, GLuint tex) {
 	wchar_t s[256]; 
-	unsigned char* texdata;
+	unsigned char* texdata,r=255,g=255,b=255;
 	int i, j, x, y;
 	int px = 0;
 	texdata = (unsigned char*)malloc(256 * 8192 * 4);
-	length=MultiByteToWideChar(CP_UTF8, 0, text, textlength, s, 256);
+	int length=MultiByteToWideChar(CP_UTF8, 0, text, textlength, s, 256);
 	if (length > 128) {
 		length = 128;
 	}
+	charcount = 0;
 	for (int c = 0; c < length; c++) {
-		if (s[c] == L"æ«"[0]) {
+		if (s[c] == L"æ«"[0] && c > 1 && s[c - 1] == L"Ã×"[0]) {
 			s[c] = L"Â¿"[0];
 		}
 		if (s[c] == L"ÍÃ"[0]) {
 			s[c] = L"Â¿"[0];
+		}
+		if (s[c] == L"<"[0]) {
+			int pos = find(s + c, length - c, L">", 1);
+			if (pos > 0) {
+				if (s[c + 1] == L"c"[0]) {
+					int sharp = find(s + c, length - c, L"#", 1);
+					if (sharp >= 0) {
+						r = tr1610(s[c + sharp + 1]) * 16 + tr1610(s[c + sharp + 2]);
+						g = tr1610(s[c + sharp + 3]) * 16 + tr1610(s[c + sharp + 4]);
+						b = tr1610(s[c + sharp + 5]) * 16 + tr1610(s[c + sharp + 6]);
+					}
+				}
+				else if (s[c + 1] == L"/"[0]) {
+					r = 255;
+					g = 255;
+					b = 255;
+				}
+				c += pos;
+				continue;
+			}
+		}
+		if (s[c] == L"{"[0]) {
+			int pos = find(s + c, length - c, L"}", 1);
+			if (pos == 10) {
+				memcpy(s + c, L"Faisal#6675", 22);
+			}
 		}
 		FT_UInt charindex = FT_Get_Char_Index(face,s[c]);
 		i = FT_Load_Glyph(face, charindex, FT_LOAD_DEFAULT);
 		i = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
 		for (i = 0; i < 256; i++) {
 			for (j = 0; j < 128; j++) {
-				texdata[i * 8192 * 4 + (j + px) * 4] = 255;
-				texdata[i * 8192 * 4 + (j + px) * 4 + 1] = 255;
-				texdata[i * 8192 * 4 + (j + px) * 4 + 2] = 255;
+				texdata[i * 8192 * 4 + (j + px) * 4] = r;
+				texdata[i * 8192 * 4 + (j + px) * 4 + 1] = g;
+				texdata[i * 8192 * 4 + (j + px) * 4 + 2] = b;
 				texdata[i * 8192 * 4 + (j + px) * 4 + 3] = 0;
 			}
 		}
@@ -856,9 +1084,9 @@ int gendia(const char* text, int textlength,float *charpos,int &length, GLuint t
 			}
 		}
 		px += face->glyph->advance.x / 64;
-		charpos[c] = px * (1.0/128.0);
+		charpos[charcount] = px * (1.0/128.0);
+		charcount++;
 		if (px > 8192 - 128) {
-			length = c + 1;
 			break;
 		}
 	}
@@ -878,51 +1106,157 @@ int gendia(const char* text, int textlength,float *charpos,int &length, GLuint t
 	return 0;
 }
 
+
+int gendec(std::vector<std::string> decs, float* charpos, GLuint tex) {
+	wchar_t s[256];
+	unsigned char* texdata;
+	int i, j, x, y;
+	int px = 0;
+	texdata = (unsigned char*)malloc(256 * 8192 * 4);
+	charpos[0] = 0.0f;
+	for (int sc = 0; sc < decs.size()&& sc < 7; sc++) {
+		int length = MultiByteToWideChar(CP_UTF8, 0, decs[sc].c_str(), decs[sc].length(), s, 256);
+		if (length > 128) {
+			length = 128;
+		}
+		for (int c = 0; c < length; c++) {
+			if (s[c] == L"æ«"[0] && c > 1 && s[c - 1] == L"Ã×"[0]) {
+				s[c] = L"Â¿"[0];
+			}
+			if (s[c] == L"ÍÃ"[0]) {
+				s[c] = L"Â¿"[0];
+			}
+			FT_UInt charindex = FT_Get_Char_Index(face, s[c]);
+			i = FT_Load_Glyph(face, charindex, FT_LOAD_DEFAULT);
+			i = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
+			for (i = 0; i < 256; i++) {
+				for (j = 0; j < 128; j++) {
+					texdata[i * 8192 * 4 + (j + px) * 4] = 255;
+					texdata[i * 8192 * 4 + (j + px) * 4 + 1] = 255;
+					texdata[i * 8192 * 4 + (j + px) * 4 + 2] = 255;
+					texdata[i * 8192 * 4 + (j + px) * 4 + 3] = 0;
+				}
+			}
+
+			for (i = 0; i < face->glyph->bitmap.rows; i++) {
+				for (j = 0; j < face->glyph->bitmap.width; j++) {
+					x = j + face->glyph->bitmap_left;
+					y = i + 127 - face->glyph->bitmap_top;
+					if (0 <= x && x <= 127 && 0 <= y && y <= 255) {
+						texdata[y * 8192 * 4 + (x + px) * 4 + 3] = face->glyph->bitmap.buffer[i * face->glyph->bitmap.pitch + j];
+					}
+				}
+			}
+			px += face->glyph->advance.x / 64;
+			if (px > 8192 - 128) {
+				goto full;
+			}
+		}
+		charpos[sc + 1] = px * (1.0 / 128.0);
+	}
+full:
+	;
+	for (i = 0; i < 7; i++) {
+		if (charpos[i + 1] < charpos[i]) {
+			charpos[i + 1] = charpos[i];
+		}
+	}
+	for (i = 0; i < 256; i++) {
+		for (j = 0; j < 128 && j < 8192 - px; j++) {
+			texdata[i * 8192 * 4 + (j + px) * 4] = 255;
+			texdata[i * 8192 * 4 + (j + px) * 4 + 1] = 255;
+			texdata[i * 8192 * 4 + (j + px) * 4 + 2] = 255;
+			texdata[i * 8192 * 4 + (j + px) * 4 + 3] = 0;
+		}
+	}
+#ifdef _SHOW
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8192, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, texdata);
+#endif 
+	free(texdata);
+	return 0;
+}
+
+
 int loadtex(std::string& s0, GLuint tex) {
 	cv::Mat rgb, a;
 	int c1, c2;
 	int pos;
 	std::string s;
+	std::string srgb, sa;
+	int charn=0;
+	std::map<std::string, std::vector<imgname_t>>::const_iterator it;
 	pos = find(s0.c_str(), s0.length(),"#", 1);
+	for (int i = 0; i < s0.length(); i++) {
+		if ('A' <= s0[i] && s0[i] <= 'Z') {
+			s0[i] = s0[i] - 'A' + 'a';
+		}
+	}
 	if (pos > 1) {
 		int i;
-		for (i = 1; i < s0.length() - pos && '0' <= s0[pos + i] && s0[pos + i] <= '9'; i++);
-		if ('0' <= s0[pos - 1] && s0[pos - 1] <= '9') {
-			s = std::string(s0.c_str(), pos - 1) + std::string(s0.c_str() + pos + 1, i - 1);
+		for (i = 1; i < s0.length() - pos && '0' <= s0[pos + i] && s0[pos + i] <= '9'; i++) {
+			charn = charn * 10 + s0[pos + i]-'0';
 		}
-		else {
-			s = std::string(s0.c_str(), pos) + "_" + std::string(s0.c_str() + pos + 1, i - 1);
-		}
+		s = std::string(s0.c_str(), pos);
 	}
 	else {
 		s = s0;
 	}
-	rgb = cv::imread("D:/files/data/5/avg/Texture2D/" + s + ".png");
-	a = cv::imread("D:/files/data/5/avg/Texture2D/" + s + "[alpha].png");
-	if (!rgb.data) {
-		s = s0 + "_1";
-		rgb = cv::imread("D:/files/data/5/avg/Texture2D/" + s + ".png");
-		a = cv::imread("D:/files/data/5/avg/Texture2D/" + s + "[alpha].png");
+	if (charn == 0) {
+		charn = 1;
 	}
+	it = charnamemap.find(s);
+	if (it != charnamemap.end()) {
+		srgb = it->second[charn - 1].rgb;
+		sa = it->second[charn - 1].a;
+	}
+	else {
+		srgb = s0;
+		sa = s0 + "[alpha]";
+	}
+
+	rgb = cv::imread("D:/files/data/5/avg/Texture2D/" + srgb + ".png",-1);
+	a = cv::imread("D:/files/data/5/avg/Texture2D/" + sa + ".png",-1);
+
 	if (rgb.data) {
 
 #ifdef _SHOW
 		uchar* texdata;
 		texdata = (uchar*)malloc(rgb.rows * rgb.cols * 4);
 		if (a.data) {
-			for (int i = 0; i < rgb.rows * rgb.cols; i++) {
-				texdata[i * 4] = rgb.data[i * 3 + 2];
-				texdata[i * 4 + 1] = rgb.data[i * 3 + 1];
-				texdata[i * 4 + 2] = rgb.data[i * 3 + 0];
-				texdata[i * 4 + 3] = a.data[i * 3];
+			if (rgb.step.buf[1] == 4) {
+				for (int i = 0; i < rgb.rows * rgb.cols; i++) {
+					texdata[i * 4] = rgb.data[i * 4 + 2];
+					texdata[i * 4 + 1] = rgb.data[i * 4 + 1];
+					texdata[i * 4 + 2] = rgb.data[i * 4 + 0];
+					texdata[i * 4 + 3] = a.data[i * a.step.buf[1]];
+				}
+			}
+			else {
+				for (int i = 0; i < rgb.rows * rgb.cols; i++) {
+					texdata[i * 4] = rgb.data[i * 3 + 2];
+					texdata[i * 4 + 1] = rgb.data[i * 3 + 1];
+					texdata[i * 4 + 2] = rgb.data[i * 3 + 0];
+					texdata[i * 4 + 3] = a.data[i * a.step.buf[1]];
+				}
 			}
 		}
 		else {
-			for (int i = 0; i < rgb.rows * rgb.cols; i++) {
-				texdata[i * 4] = rgb.data[i * 3 + 2];
-				texdata[i * 4 + 1] = rgb.data[i * 3 + 1];
-				texdata[i * 4 + 2] = rgb.data[i * 3 + 0];
-				texdata[i * 4 + 3] = 255;
+			if (rgb.step.buf[1] == 4) {
+				for (int i = 0; i < rgb.rows * rgb.cols; i++) {
+					texdata[i * 4] = rgb.data[i * 4 + 2];
+					texdata[i * 4 + 1] = rgb.data[i * 4 + 1];
+					texdata[i * 4 + 2] = rgb.data[i * 4 + 0];
+					texdata[i * 4 + 3] = rgb.data[i * 4 + 3];
+				}
+			}
+			else {
+				for (int i = 0; i < rgb.rows * rgb.cols; i++) {
+					texdata[i * 4] = rgb.data[i * 3 + 2];
+					texdata[i * 4 + 1] = rgb.data[i * 3 + 1];
+					texdata[i * 4 + 2] = rgb.data[i * 3 + 0];
+					texdata[i * 4 + 3] = 255;
+				}
 			}
 		}
 		glBindTexture(GL_TEXTURE_2D, tex);
@@ -932,26 +1266,235 @@ int loadtex(std::string& s0, GLuint tex) {
 		return 0;
 	}
 	else {
-		fprintf(filog, "cannot open:%s\n", s.c_str());
+		fprintf(filog, "cannot open:%s\n", s0.c_str());
 	}
 	return -1;
 }
 
-int play(char* con, int length) {
-	std::vector<std::string> line;
-	getline(con, length, line);
-	/*if (line.size() == 243) {
-		PostQuitMessage(0);
-		//return 0;
+int cachetex(GLuint tex, texdata_t& texdata) {
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &(texdata.w));
+	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &(texdata.h));
+	texdata.data.resize(texdata.w * texdata.h);
+	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, texdata.data.data());
+	return 0;
+}
+
+int loadtex(GLuint tex, texdata_t& texdata) {
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texdata.w, texdata.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, texdata.data.data());
+	return 0;
+}
+
+int cacheframetex(framedes_t frame, frametexdate_t &texdata) {
+	if (frame.bg.tex) {
+		cachetex(frame.bg.tex, texdata.bg);
 	}
-	else {
-		return 0;
-	}*/
-	int frame;
-	int hed, pos, next, i,j, pc1, pc2;
-	framedes_t  fcur = { 0 }, flast = { 0 };
-	fadedes_t fade = { 0 };
+	if (frame.image.tex) {
+		cachetex(frame.image.tex, texdata.image);
+	}
+	if (frame.c.c1) {
+		cachetex(frame.c.c1, texdata.c1);
+	}
+	if (frame.c.c2) {
+		cachetex(frame.c.c2, texdata.c2);
+	}
+	if (frame.cc.cc) {
+		cachetex(frame.cc.cc, texdata.cc);
+	}
+	if (frame.cname) {
+		cachetex(frame.cname, texdata.cname);
+	}
+	if (frame.dia) {
+		cachetex(frame.dia, texdata.dia);
+	}
+	return 0;
+}
+
+
+int loadframetex(framedes_t &frame, framecache_t& framecache) {
+	frame = framecache.frame;
+	if (framecache.frame.bg.tex) {
+		loadtex(bg, framecache.frametexdata.bg);
+		frame.bg.tex = bg;
+	}
+	if (framecache.frame.image.tex) {
+		loadtex(image, framecache.frametexdata.image);
+		frame.image.tex = image;
+	}
+	if (framecache.frame.c.c1) {
+		loadtex(c1, framecache.frametexdata.c1);
+		frame.c.c1 = c1;
+	}
+	if (framecache.frame.c.c2) {
+		loadtex(c2, framecache.frametexdata.c2);
+		frame.c.c2 = c2;
+	}
+	if (framecache.frame.cc.cc) {
+		loadtex(cc, framecache.frametexdata.cc);
+		frame.cc.cc = cc;
+	}
+	if (framecache.frame.cname) {
+		loadtex(cname, framecache.frametexdata.cname);
+		frame.cname = cname;
+	}
+	if (framecache.frame.dia) {
+		loadtex(dia, framecache.frametexdata.dia);
+		frame.dia = dia;
+	}
+	return 0;
+}
+
+
+
+struct tn_t {
+	int dec;
+	int line;
+	std::vector<int> chil, pare;
+};
+
+int gentree(std::vector<tn_t>& tree, std::vector<std::string>& line) {
+	tn_t tn;
+	tn.line = -1;
+	tn.dec = 0;
+	std::vector<int> dec;
+	dec.push_back(tree.size());
+	tree.push_back(tn);
+	int i, j;
+	std::set<int> curdec;
+	curdec.insert(0);
+	int hed;
 	std::string cmd;
+	int linec = line.size();
+	for (i = 0; i < linec; i++) {
+		cmd.clear();
+		if (line[i][0] == '[') {
+			hed = find(line[i].c_str(), line[i].length(), "]", 1);
+			if (hed > 0) {
+				for (j = 1; j < hed && (line[i][j] >= 'a' && line[i][j] <= 'z' || line[i][j] >= 'A' && line[i][j] <= 'Z'); j++) {
+				}
+				cmd = std::string(line[i].c_str() + 1, j - 1);
+			}
+		}
+		if (cmd == "Decision") {
+			tn.line = i;
+			tn.dec = 0;
+			tree.push_back(tn);
+			for (j = 0; j < dec.size(); j++) {
+				if (curdec.find(tree[dec[j]].dec) != curdec.end()) {
+					tree[dec[j]].chil.push_back(tree.size() - 1);
+					tree[tree.size() - 1].pare.push_back(dec[j]);
+					dec.erase(dec.begin() + j);
+					j--;
+				}
+			}
+
+			std::string  valstr, optstr;
+			std::vector<std::string> val, opt;
+			getparas(line[i].c_str(), hed, "options=\"", strlen("options=\""), optstr);
+			getparas(line[i].c_str(), hed, "values=\"", strlen("values=\""), valstr);
+			getline(valstr.c_str(), valstr.length(), val, ";", 1);
+			getline(optstr.c_str(), optstr.length(), opt, ";", 1);
+			for (j = 0; j < val.size(); j++) {
+				int x;
+				sscanf_s(val[j].c_str(), "%d", &x);
+				line.push_back("[name=\"Doctor\"]" + opt[j]);
+				tn.line = line.size() - 1;
+				tn.dec = x;
+				tree.push_back(tn);
+
+				tree[tree.size() - 2 - j].chil.push_back(tree.size() - 1);
+				tree[tree.size() - 1].pare.push_back(tree.size() - 2 - j);
+				dec.push_back(tree.size() - 1);
+			}
+		}
+		else if (cmd == "Predicate") {
+			curdec.clear();
+			std::string refstr;
+			std::vector<std::string> ref;
+			getparas(line[i].c_str(), hed, "references=\"", strlen("references=\""), refstr);
+			getline(refstr.c_str(), refstr.length(), ref, ";", 1);
+			for (j = 0; j < ref.size(); j++) {
+				int x;
+				sscanf_s(ref[j].c_str(), "%d", &x);
+				curdec.insert(x);
+			}
+		}
+		else {
+			for (j = 0; j < dec.size(); j++) {
+				if (curdec.find(tree[dec[j]].dec) != curdec.end()) {
+					tn.line = i;
+					tn.dec = tree[dec[j]].dec;
+					tree.push_back(tn);
+					tree[dec[j]].chil.push_back(tree.size() - 1);
+					tree[tree.size() - 1].pare.push_back(dec[j]);
+					dec[j] = tree.size() - 1;
+				}
+			}
+		}
+	}
+
+	tn.line = -1;
+	tn.dec = 0;
+	tree.push_back(tn);
+	for (j = 0; j < dec.size(); j++) {
+		tree[dec[j]].chil.push_back(tree.size() - 1);
+		tree[tree.size() - 1].pare.push_back(dec[j]);
+	}
+	//return 0;
+	for (;;) {
+		int haschange = 0;
+		for (i = 0; i < tree.size(); i++) {
+			if (tree[i].pare.size() > 1) {
+				for (j = 1; j < tree[i].pare.size(); j++) {
+					int k;
+					for (k = 0; k < j;k++) {
+						if (tree[tree[i].pare[j]].line == tree[tree[i].pare[k]].line&& tree[i].pare[j]!= tree[i].pare[k]) {
+							int l;
+							for (l = 0; l < tree[tree[i].pare[k]].pare.size();l++) {
+								for (int m = 0; m < tree[tree[tree[i].pare[k]].pare[l]].chil.size(); m++) {
+									if (tree[tree[tree[i].pare[k]].pare[l]].chil[m] == tree[i].pare[k]) {
+										int hchild = 0;
+										for (int n = 0; n < tree[tree[tree[i].pare[k]].pare[l]].chil.size(); n++) {
+											if (tree[tree[tree[i].pare[k]].pare[l]].chil[n] == tree[i].pare[j]) {
+												hchild == 1;
+											}
+										}
+										if (hchild) {
+											tree[tree[tree[i].pare[k]].pare[l]].chil.erase(tree[tree[tree[i].pare[k]].pare[l]].chil.begin() + m);
+											m--;
+										}
+										else {
+											tree[tree[tree[i].pare[k]].pare[l]].chil[m] = tree[i].pare[j];
+											tree[tree[i].pare[j]].pare.push_back(tree[tree[i].pare[k]].pare[l]);
+										}
+									}
+								}
+							}
+							tree[i].pare.erase(tree[i].pare.begin() + k);
+							goto next;
+						}
+					}
+				}
+			}
+		}
+		break;
+	next:
+		;
+	}
+	return 0;
+}
+
+std::vector<std::string> line;
+std::vector<tn_t> tree;
+std::vector<framecache_t> framecache;
+framedes_t  fcur = { 0 }, flast = { 0 };
+fadedes_t fade = { 0 };
+
+int play(char* con, int length) {
+	getline(con, length, line);
+	gentree(tree, line);
+	std::cout << tree.size();
 	fcur.bg.sx = 1.0;
 	fcur.bg.sy = 1.0;
 	fcur.image.sx = 1.0;
@@ -960,7 +1503,15 @@ int play(char* con, int length) {
 	fcur.blocker.r = 0.0;
 	fcur.blocker.g = 0.0;
 	fcur.blocker.b = 0.0;
-	for (i = 0; i < line.size(); i++ ) {
+	return 0;
+}
+
+int play(int cur) {
+	int frame;
+	int hed, pos, next, i, j, pc1, pc2;
+	std::string cmd;
+	i = tree[cur].line;
+	if (i >= 0) {
 		if (line[i][0] == '[') {
 			hed = find(line[i].c_str(), line[i].length(), "]", 1);
 			if (hed > 0) {
@@ -972,7 +1523,7 @@ int play(char* con, int length) {
 					fcur.cname = 0;
 				}
 				else if (cmd == "Character" || cmd == "character") {
-					float t = 0.1;
+					float t = 0.0;
 					flast.c = fcur.c;
 					std::swap(c1, c1_);
 					std::swap(c2, c2_);
@@ -1052,6 +1603,10 @@ int play(char* con, int length) {
 				else if (cmd == "Blocker" || cmd == "blocker") {
 					float t = 0.5;
 					flast.blocker = fcur.blocker;
+					fcur.blocker.a = 1.0;
+					fcur.blocker.r = 0.0;
+					fcur.blocker.g = 0.0;
+					fcur.blocker.b = 0.0;
 					getparaf(line[i].c_str(), hed, "a=", strlen("a="), fcur.blocker.a);
 					getparaf(line[i].c_str(), hed, "r=", strlen("r="), fcur.blocker.r);
 					getparaf(line[i].c_str(), hed, "g=", strlen("g="), fcur.blocker.g);
@@ -1112,9 +1667,10 @@ int play(char* con, int length) {
 					fcur.cnamepos = diapos[length - 1];
 
 					fcur.dia = dia;
-					int sp;
+					int sp, esp;
 					for (sp = 1; sp < line[i].length() - hed && line[i][hed + sp] == ' '; sp++);
-					gendia(line[i].c_str() + hed + sp, line[i].length() - hed - sp, diapos, length, dia);
+					for (esp = line[i].length() - hed - sp; esp > 0 && line[i][hed + sp + esp - 1] == ' '; esp--);
+					gendia(line[i].c_str() + hed + sp, esp, diapos, length, dia);
 					for (frame = 1; frame < length; frame++) {
 						if (diapos[frame] > 32.0f) {
 							fcur.turnpos = diapos[frame - 1];
@@ -1126,9 +1682,11 @@ int play(char* con, int length) {
 						draw(fcur, flast, fade);
 						draw(fcur, flast, fade);
 						draw(fcur, flast, fade);
+						//draw(fcur, flast, fade);
 					}
 					for (frame = 0; frame < 10 - length; frame++) {
 						draw(fcur, flast, fade);
+						//draw(fcur, flast, fade);
 					}
 					for (frame = 0; frame < 36; frame++) {
 						draw(fcur, flast, fade);
@@ -1300,13 +1858,66 @@ int play(char* con, int length) {
 						}
 					}
 				}
-				else if (cmd == "Decision") {
-				}
 				else if (cmd == "Predicate") {
 				}
+				else if (cmd == "Decision") {
+					std::string  optstr;
+					std::vector<std::string>  opt;
+					getparas(line[i].c_str(), hed, "options=\"", strlen("options=\""), optstr);
+					getline(optstr.c_str(), optstr.length(), opt, ";", 1);
+					memset(fcur.dec.turn, 0, sizeof(fcur.dec.turn));
+					gendec(opt, fcur.dec.turn, dec);
+					fcur.dec.count = opt.size();
+					fcur.dec.dectex = dec;
+					if (fcur.dec.count > 7) {
+						fcur.dec.count = 7;
+					}
+					int sum = 0;
+					for (int oc = 0; oc < fcur.dec.count; oc++) {
+						sum += opt[oc].length() * 2;
+						if (opt[oc].length() < 5) {
+							sum += 5 - opt[oc].length();
+						}
+						sum += 12;
+					}
+					sum += 18;
+					for (frame = 0; frame < sum; frame++) {
+						draw(fcur, flast, fade);
+					}
+					fcur.dec.dectex = 0;
+				}
 				else if (cmd == "cameraEffect" || cmd == "CameraEffect") {
+					flast.cc = fcur.cc;
+					fcur.amount = 0;
+					getparaf(line[i].c_str(), hed, "amount=", strlen("amount="), fcur.amount);
 				}
 				else if (cmd == "CharacterCutin") {
+					float t = 0.0;
+					std::swap(cc, cc_);
+					flast.cc = fcur.cc;
+					if ((pc1 = find(line[i].c_str(), hed, "name=\"", strlen("name=\""))) > 0) {
+						std::string s;
+						getparas(line[i].c_str(), hed, "name=\"", strlen("name=\""), s);
+						loadtex(s, cc);
+						fcur.cc.cc = cc;
+						fcur.cc.width = 200.0;
+						getparaf(line[i].c_str(), hed, "width=", strlen("width="), fcur.cc.width);
+						fcur.cc.width *= (3.0 / 1080.0);
+						fcur.cc.x = 0.0;
+						getparaf(line[i].c_str(), hed, "offsetx=", strlen("offsetx="), fcur.cc.x);
+						fcur.cc.x *= (3.0 / 1080.0);
+					}
+					else {
+						fcur.cc.cc = 0;
+					}
+					getparaf(line[i].c_str(), hed, "fadetime=", strlen("fadetime="), t);
+					fade.charcutinall = t * 60 + 0.5;
+					fade.charcutinleft = fade.charcutinall;
+					if (find(line[i].c_str(), hed, "block=true", strlen("block=true")) > 0) {
+						while (fade.charcutinleft) {
+							draw(fcur, flast, fade);
+						}
+					}
 				}
 				else {
 					fprintf(filog, "cmd:%s\n", cmd.c_str());
@@ -1315,10 +1926,10 @@ int play(char* con, int length) {
 		}
 		else {
 			if (line[i] == "// Comments") {
-				continue;
+				goto it;
 			}
-			if (line[i][1] =='/') {
-				continue;
+			if (line[i][1] == '/') {
+				goto it;
 			}
 			float diapos[128];
 			int length;
@@ -1336,16 +1947,52 @@ int play(char* con, int length) {
 				draw(fcur, flast, fade);
 				draw(fcur, flast, fade);
 				draw(fcur, flast, fade);
+				//draw(fcur, flast, fade);
 			}
-			for (frame = 0; frame < 10-length; frame++) {
+			for (frame = 0; frame < 10 - length; frame++) {
 				draw(fcur, flast, fade);
+				//draw(fcur, flast, fade);
 			}
 			for (frame = 0; frame < 36; frame++) {
 				draw(fcur, flast, fade);
 			}
 		}
 	}
-	return 0;
+it:
+	int tempcur;
+	if (tree[cur].chil.size() == 0) {
+		return -1;
+	}
+	else {
+		tempcur = tree[cur].chil[0];
+		if (tree[cur].chil.size() > 1) {
+			framecache_t framec;
+			cacheframetex(fcur, framec.frametexdata);
+			framec.frame = fcur;
+			framecache.push_back(framec);
+		}
+	}
+	if (tree[tempcur].pare.size() > 1) {
+		for (j = 0; j < tree[tempcur].pare.size(); j++) {
+			if (tree[tempcur].pare[j] == cur) {
+				tree[tempcur].pare.erase(tree[tempcur].pare.begin() + j);
+			}
+		}
+		while (tree[cur].chil.size() == 1) {
+			cur = tree[cur].pare[0];
+		}
+		tree[cur].chil.erase(tree[cur].chil.begin());
+		fade = { 0 };
+		loadframetex(fcur, framecache[framecache.size() - 1]);
+		framecache.pop_back();
+		for (int frame = 0; frame < 60; frame++) {
+			draw(fcur, flast, fade);
+		}
+	}
+	else {
+		cur = tempcur;
+	}
+	return cur;
 }
 
 //
@@ -1549,6 +2196,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glGenTextures(1, &cc);
+		glBindTexture(GL_TEXTURE_2D, cc);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glGenTextures(1, &c1_);
 		glBindTexture(GL_TEXTURE_2D, c1_);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -1561,8 +2214,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glGenTextures(1, &cc_);
+		glBindTexture(GL_TEXTURE_2D, cc_);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glGenTextures(1, &dia);
 		glBindTexture(GL_TEXTURE_2D, dia);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glGenTextures(1, &dec);
+		glBindTexture(GL_TEXTURE_2D, dec);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1573,10 +2238,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glGenTextures(1, &diabg);
+		glBindTexture(GL_TEXTURE_2D, diabg);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		std::string  s("3");
+		loadtex(s, diabg);
 		//std::string st("char_002_amiya_2");
 		//loadtex(st, texbuffer);
 
-		writer.open("D:/files/data/5/avg/test4.mp4", cv::VideoWriter::fourcc('H', '2', '6', '4'), 60.0, cv::Size(1920, 1080));
+		writer.open("C:/files/avg/" + filename + ".mp4", cv::VideoWriter::fourcc('a', 'v', 'c', '1'), 60.0, cv::Size(1920, 1080));// cv::VideoWriter::fourcc('X', '2', '6', '4')
 
 		int i, j;
 		i = FT_Init_FreeType(&ftlib);
@@ -1589,69 +2262,69 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		cx = lParam & 0xffff;
 		cy = (lParam & 0xffff0000) >> 16;
 		//draw({ 0 });
-		break;
+		//break;
 	}
 	case WM_KEYDOWN: {
-		switch (wParam) {
-		case(32): {
-			FILE* fi;
-			char* ficon;
-			int ficount;
-			/*for (int i = 0; i < 6; i++) {
-				for (int j = 0; j < 20; j++) {
-					char s[256];
-					sprintf_s(s, "D:/files/data/5/avg/TextAsset/level_main_%02d-%02d_BEG.txt", i, j);
-					if (!fopen_s(&fi, s, "rb")) {
-						fseek(fi, 0, SEEK_END);
-						ficount = ftell(fi);
-						fseek(fi, 0, SEEK_SET);
-						ficon = (char*)malloc(ficount * sizeof(char));
-						ficount = fread(ficon, 1, ficount, fi);
-						fclose(fi);
-						fprintf(filog, "play:%s\n", s);
-						play(ficon, ficount);
-						free(ficon);
-						//genmusic();
-						//PostQuitMessage(0);
-						//return 0;
-					}
-					sprintf_s(s, "D:/files/data/5/avg/TextAsset/level_main_%02d-%02d_END.txt", i, j);
-					if (!fopen_s(&fi, s, "rb")) {
-						fseek(fi, 0, SEEK_END);
-						ficount = ftell(fi);
-						fseek(fi, 0, SEEK_SET);
-						ficon = (char*)malloc(ficount * sizeof(char));
-						ficount = fread(ficon, 1, ficount, fi);
-						fprintf(filog, "play:%s\n", s);
-						play(ficon, ficount);
-						fclose(fi);
-						free(ficon);
-						//PostQuitMessage(0);
-					}
+		//switch (wParam) {
+		//case(32): {
+		FILE* fi;
+		char* ficon;
+		int ficount;
+		/*for (int i = 0; i < 6; i++) {
+			for (int j = 0; j < 20; j++) {
+				char s[256];
+				sprintf_s(s, "D:/files/data/5/avg/TextAsset/level_act3d0_%02d_beg.txt",  j);
+				if (!fopen_s(&fi, s, "rb")) {
+					fseek(fi, 0, SEEK_END);
+					ficount = ftell(fi);
+					fseek(fi, 0, SEEK_SET);
+					ficon = (char*)malloc(ficount * sizeof(char));
+					ficount = fread(ficon, 1, ficount, fi);
+					fclose(fi);
+					fprintf(filog, "play:%s\n", s);
+					play(ficon, ficount);
+					free(ficon);
+					//genmusic();
 					//PostQuitMessage(0);
 					//return 0;
 				}
-			}*/
-			if(!fopen_s(&fi, "D:/files/data/5/avg/sc1.txt", "rb")) {
-				fseek(fi, 0, SEEK_END);
-				ficount = ftell(fi);
-				fseek(fi, 0, SEEK_SET);
-				ficon = (char*)malloc(ficount * sizeof(char));
-				ficount = fread(ficon, 1, ficount, fi);
-				//fprintf(filog, "play:%s\n", s);
-				play(ficon, ficount);
-				fclose(fi);
-				free(ficon);
+				sprintf_s(s, "D:/files/data/5/avg/TextAsset/level_act3d0_%02d_end.txt", j);
+				if (!fopen_s(&fi, s, "rb")) {
+					fseek(fi, 0, SEEK_END);
+					ficount = ftell(fi);
+					fseek(fi, 0, SEEK_SET);
+					ficon = (char*)malloc(ficount * sizeof(char));
+					ficount = fread(ficon, 1, ficount, fi);
+					fprintf(filog, "play:%s\n", s);
+					play(ficon, ficount);
+					fclose(fi);
+					free(ficon);
+					//PostQuitMessage(0);
+				}
 				//PostQuitMessage(0);
+				//return 0;
 			}
-			writer.release(); 
-			genmusic();
-			PostQuitMessage(0);
-			break;
+		}*/
+		if (!fopen_s(&fi, ("D:/files/data/5/avg/TextAsset/" + filename + ".txt").c_str(), "rb")) {
+			fseek(fi, 0, SEEK_END);
+			ficount = ftell(fi);
+			fseek(fi, 0, SEEK_SET);
+			ficon = (char*)malloc(ficount * sizeof(char));
+			ficount = fread(ficon, 1, ficount, fi);
+			//fprintf(filog, "play:%s\n", s);
+			play(ficon, ficount);
+			fclose(fi);
+			free(ficon);
+			//PostQuitMessage(0);
 		}
-		}
+		//writer.release(); 
+		//genmusic();
+		//PostQuitMessage(0);
+		//break;
+	//}
+	//}
 		break;
-	} 
+	}
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
